@@ -10,7 +10,7 @@
 
 | 文件 | 大小 | 用于 |
 | --- | --- | --- |
-| `zh_CN.dic` | 32,908 条，约 637 KB | **词悦、GoldenDict-ng** |
+| `zh_CN.dic` | 35,325 条，约 678 KB | **词悦、GoldenDict-ng** |
 | `zh_CN.aff` | 38 B | 与上面配对，空壳 |
 | `build_words.py` | — | 从词典目录生成 `words.txt` |
 | `generate_zh_dic.py` | — | 从词表生成**全量** `.dic` |
@@ -134,11 +134,11 @@ python3 prune_zh_dic.py zh_CN_full.dic zh_CN
 其余保留：
 
 ```
-1,263,058 条  →  32,908 条（33 MB → 637 KB）
-  单字行保留    10,352
-  词级行保留    22,556
+1,264,842 条  →  35,325 条（33 MB → 678 KB）
+  单字行保留    11,112
+  词级行保留    24,213
     不能按字生成     714   （词悦补不了）
-    OpenCC 补不了 21,842   （GoldenDict-ng 补不了）
+    OpenCC 补不了 23,499   （GoldenDict-ng 补不了）
 ```
 
 脚本在写文件前会校验「源表每一条仍可推导」，写完后再校验一次输出文件，因此不会在
