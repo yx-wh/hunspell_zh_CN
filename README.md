@@ -84,13 +84,26 @@ head 的多行**：
 发/X st:髮
 ```
 
-`/X` 不是词缀规则，`zh_CN.aff` 里也没有定义它。加它是因为 Hunspell **1.7.3 起**
-的 `HashMgr::add_word()` 会把「同 head、无 affix flag」的第二行当重复词丢弃，
-连 `st:` 一起丢（[hunspell#1171](https://github.com/hunspell/hunspell/issues/1171)）。
-带上任意一个 flag 就改走 `next_homonym` 分支，两行都保留；未定义的 flag 不产生
-派生词形，也不影响 `spell()`。
+`/X` 不是词缀规则，`zh_CN.aff` 里也没有定义它。它是用来绕过一个上游回归的。
 
-只有「一个 head 对应多个变体」的行才需要加，单值行不加。
+Hunspell 1.7.3 的 [`f23fcd33`](https://github.com/hunspell/hunspell/commit/f23fcd33052c7c8a307eaa3e1b1a4c0cdcf45651)
+（`ofz: Out-of-memory`）在 `HashMgr::add_word()` 里加了「同 head、无 affix flag
+的一律当重复词跳过」的分支，却没比较 `HENTRY_DATA`（morph 描述）。于是
+`发 st:發` / `发 st:髮` 两行只留第一行，`髮` 静默消失——`spell("发")` 仍是 true，
+所以拼写检查这一侧完全看不出问题。1.7.2 及以前走 `next_homonym`，两行都保留。
+
+带上任意一个 flag 就改回 `next_homonym` 分支；未定义的 flag 不产生派生词形，也不
+影响 `spell()`（`hunspell -G` 只会吐出词本身）。已向上游报告：
+[hunspell#1171](https://github.com/hunspell/hunspell/issues/1171)。
+
+只有「一个 head 对应多个变体」的行才需要加，单值行不加。两个前提：
+
+- `X` 必须在 `.aff` 里**保持未定义**——真给它写 `SFX` 规则就会开始派生词形；
+- `FLAG` 不能是 `num`，否则 `X` 不是合法 flag，那两行会重新被合并掉。
+
+标准 Hunspell（包括 GoldenDict-ng 用的系统库）都需要这个 flag。词悦自己 vendored
+了 `hashmgr.cxx` 并放宽了去重条件，加不加都能拿到全部词干；等上游合并修复后，这里
+可以改回不带 flag 的写法。
 
 ## 生成
 
@@ -149,3 +162,4 @@ python3 prune_zh_dic.py zh_CN_full.dic zh_CN
 - 只覆盖**单字表里出现过**的字；表里没有的字保持原样，不会自行发明映射。
 - 只做**精确查找**：`st:` 映射整词，无法补全尚未输入的字，所以逐键建议不会展开异体。
 - 逐字替换要求**字数相同**；字数不同的映射必须写成词级条目。
+- 依赖 Hunspell 的 homonym 行为：1.7.3 起「同 head、无 flag」的行会被去重，本表用未定义的 `/X` 绕过，见上面的说明；上游修复后可去掉。
