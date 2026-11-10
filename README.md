@@ -10,7 +10,7 @@
 
 | 文件 | 大小 | 用于 |
 | --- | --- | --- |
-| `zh_CN.dic` | 30,506 条，约 605 KB | **词悦、GoldenDict-ng** |
+| `zh_CN.dic` | 32,308 条，约 626 KB | **词悦、GoldenDict-ng** |
 | `zh_CN.aff` | 38 B | 与上面配对，空壳 |
 | `build_words.py` | — | 从词典目录生成 `words.txt` |
 | `generate_zh_dic.py` | — | 从词表生成**全量** `.dic` |
@@ -134,8 +134,8 @@ python3 prune_zh_dic.py zh_CN_full.dic zh_CN
 其余保留：
 
 ```
-1,260,774 条  →  30,506 条（33 MB → 605 KB）
-  单字行保留     8,288
+1,262,576 条  →  32,308 条（33 MB → 626 KB）
+  单字行保留    10,090
   词级行保留    22,218
     不能按字生成     714   （词悦补不了）
     OpenCC 补不了 21,504   （GoldenDict-ng 补不了）

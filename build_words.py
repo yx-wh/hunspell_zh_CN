@@ -157,16 +157,19 @@ def main():
                 stat["shape"] += 1
                 continue
             t = maybe_s2t(w)
-            if not t or t in seen:
-                continue
-            if not CJK.search(t):
-                stat["s2t_no_cjk"] += 1
-                continue
-            if len(t) > MAX_LEN:
-                stat["s2t_long"] += 1
-                continue
-            seen.add(t)
-            out.append(t)
+            # 单字保留原形：s2t 会把异体并进正体（麽→麼、藴→蘊），只存后者时
+            # 表里就没有「麽 st:么」这一行，输入原形再按字组合也就查不到了。
+            for cand in ({t, w} if len(w) == 1 and t != w else {t}):
+                if not cand or cand in seen:
+                    continue
+                if not CJK.search(cand):
+                    stat["s2t_no_cjk"] += 1
+                    continue
+                if len(cand) > MAX_LEN:
+                    stat["s2t_long"] += 1
+                    continue
+                seen.add(cand)
+                out.append(cand)
         print(f"  [{i:02d}/{len(files)}] {name}: +{len(out) - before}")
 
     with open(out_path, "w", encoding="utf-8", newline="\n") as fh:
