@@ -14,6 +14,7 @@ gen_zh_dic.py
 
 import sys
 import os
+import json
 from collections import Counter, OrderedDict, defaultdict
 from opencc import OpenCC
 
@@ -609,12 +610,14 @@ def make_normalizer(cc):
 
 
 def main():
-    if len(sys.argv) != 3:
-        print("用法: python3 gen_zh_dic.py 詞彙表.txt 輸出.dic")
+    if len(sys.argv) not in (3, 4):
+        print("用法: python3 gen_zh_dic.py 詞彙表.txt 輸出.dic [異體字表.json]")
         sys.exit(1)
 
     in_path = sys.argv[1]
     out_path = sys.argv[2]
+    # 可選：補進「完全沒有立目」的異體字，只寫正向 st:。
+    variants_path = sys.argv[3] if len(sys.argv) == 4 else None
 
     # 繁體 -> 簡體，作為規範形式
     cc = OpenCC("t2s")
@@ -643,6 +646,12 @@ def main():
 
     def composes(ch):
         return freq[ch] >= 2 or freq[cc_s2t.convert(ch)] >= 2
+
+    def attested(ch):
+        return freq[ch] >= 1 or freq[cc_s2t.convert(ch)] >= 1
+
+    def is_bmp(ch):
+        return 0x4E00 <= ord(ch) <= 0x9FFF
 
     std_of = OrderedDict()        # 原詞 -> 規範形式
     variants = defaultdict(list)  # 規範形式 -> [原詞, ...]
@@ -683,6 +692,38 @@ def main():
             lines.append(f"{v} st:{std}")
         for v in reverse:
             lines.append(f"{std}{homonym} st:{v}")
+
+    if variants_path:
+        with open(variants_path, "r", encoding="utf-8") as f:
+            variant_groups = json.load(f)
+        # 判据是「表裡有沒有這個字的正向行」，不是「在不在詞表」：只作為
+        # 單字詞頭、但 normalize 原樣返回的字不會生成任何行，同樣要補。
+        existing_heads = {
+            line.split()[0].split("/", 1)[0]
+            for line in lines if line.strip()
+        }
+        injected = 0
+        for ch in sorted(set(variant_groups) - existing_heads):
+            # 只補擴展區／兼容區的生僻異體。BMP 裡的「人/入」「大/太」
+            # 是通假或形近組，拿來做映射只會污染常用字的查詢。
+            if is_bmp(ch):
+                continue
+            group = variant_groups[ch]
+            # 只認組內「真的被辭典用來立目」的 BMP 字當規範形
+            anchor = next(
+                (x for x in group
+                 if len(x) == 1 and is_bmp(x) and attested(x)),
+                None,
+            )
+            if anchor is None:
+                continue
+            target = normalize(anchor)
+            if len(target) != 1 or target == ch:
+                continue
+            # 完全無立目：抹掉原形沒有損失，只寫正向，不寫反向
+            lines.append(f"{ch} st:{target}")
+            injected += 1
+        print(f"從異體字表補進 {injected} 條正向行（無立目異體，只進不出）")
 
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(str(len(lines)) + "\n")
