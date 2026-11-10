@@ -14,7 +14,7 @@ gen_zh_dic.py
 
 import sys
 import os
-from collections import OrderedDict, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from opencc import OpenCC
 
 # 在 OpenCC t2s 之後逐字折疊到規範形的人工白名單。
@@ -618,6 +618,7 @@ def main():
 
     # 繁體 -> 簡體，作為規範形式
     cc = OpenCC("t2s")
+    cc_s2t = OpenCC("s2t")
     normalize = make_normalizer(cc)
 
     words = []
@@ -631,6 +632,17 @@ def main():
             if w not in seen:
                 seen.add(w)
                 words.append(w)
+
+    # 統計每個字在「多字詞頭」裡的立目次數。words.txt 是 s2t 後的繁體詞頭，
+    # 所以比對時也要看簡體形轉回繁體的結果，別把简体規範形誤判成冷僻字。
+    freq = Counter()
+    for w in words:
+        if len(w) > 1:
+            for ch in set(w):
+                freq[ch] += 1
+
+    def composes(ch):
+        return freq[ch] >= 2 or freq[cc_s2t.convert(ch)] >= 2
 
     std_of = OrderedDict()        # 原詞 -> 規範形式
     variants = defaultdict(list)  # 規範形式 -> [原詞, ...]
@@ -658,12 +670,18 @@ def main():
             # 繁簡相同、無變體，對 Goldendict 詞幹還原無用，跳過
             continue
 
+        # 反向行（規範形 → 變體）只在該變體真的被辭典用來立目時保留。
+        # 冷僻異體只需「異體 → 規範」這一側：電子書裡複製到的生僻字要能送到
+        # 詞典條目；而「某字有哪些異體」是異體字字典的職責，交給 hunspell
+        # 展開只會讓常用字每個位置都多幾個查空的候選。詞級變體一律保留。
+        reverse = [v for v in others if len(v) != 1 or composes(v)]
+
         # 標準形→多個變體是「同一個 head、多行」，標準 hunspell 會去重，
         # 因此多於一個變體時給 head 加 flag（見 HOMONYM_FLAG 註釋）。
-        homonym = f"/{HOMONYM_FLAG}" if len(others) > 1 else ""
+        homonym = f"/{HOMONYM_FLAG}" if len(reverse) > 1 else ""
         for v in others:
             lines.append(f"{v} st:{std}")
-        for v in others:
+        for v in reverse:
             lines.append(f"{std}{homonym} st:{v}")
 
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
