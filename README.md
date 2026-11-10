@@ -10,8 +10,9 @@
 
 | 文件 | 大小 | 用于 |
 | --- | --- | --- |
-| `zh_CN.dic` | 45,374 条，约 855 KB | **词悦、GoldenDict-ng** |
+| `zh_CN.dic` | 30,506 条，约 605 KB | **词悦、GoldenDict-ng** |
 | `zh_CN.aff` | 38 B | 与上面配对，空壳 |
+| `build_words.py` | — | 从词典目录生成 `words.txt` |
 | `generate_zh_dic.py` | — | 从词表生成**全量** `.dic` |
 | `prune_zh_dic.py` | — | 把全量表精简成上面那份 |
 
@@ -73,9 +74,36 @@ FLAG long
 
 单字表里没有的字无法展开——这是这张表的覆盖面边界。
 
+## 同一个 head 多行为什么带 `/X`
+
+一简对多繁（`发` → `發` / `髮`、`干` → `乾` / `幹` / `榦`）必须写成**同一个
+head 的多行**：
+
+```text
+发/X st:發
+发/X st:髮
+```
+
+`/X` 不是词缀规则，`zh_CN.aff` 里也没有定义它。加它是因为 Hunspell **1.7.3 起**
+的 `HashMgr::add_word()` 会把「同 head、无 affix flag」的第二行当重复词丢弃，
+连 `st:` 一起丢（[hunspell#1171](https://github.com/hunspell/hunspell/issues/1171)）。
+带上任意一个 flag 就改走 `next_homonym` 分支，两行都保留；未定义的 flag 不产生
+派生词形，也不影响 `spell()`。
+
+只有「一个 head 对应多个变体」的行才需要加，单值行不加。
+
 ## 生成
 
-需要 `pip install opencc-python-reimplemented`。
+需要 `pip install opencc-python-reimplemented`，以及 `mdict-utils`（处理 `.mdx`）。
+
+### 0. 从词典目录生成词表
+
+```bash
+python3 build_words.py /path/to/词典目录 words.txt
+```
+
+扫 `.mdx` / `.dsl` / `.dsl.dz`，过滤掉句子和例句反查类词典，s2t 时保护 `CHAR_FIX`
+里的类推简化字。已经有 `words.txt` 就跳过这一步。
 
 ### 1. 从词表生成全量表
 
@@ -106,11 +134,11 @@ python3 prune_zh_dic.py zh_CN_full.dic zh_CN
 其余保留：
 
 ```
-1,140,072 条  →  45,374 条（29 MB → 855 KB）
-  单字行保留     8,120
-  词级行保留    37,254
-    不能按字生成   1,020   （词悦补不了）
-    OpenCC 补不了  36,234   （GoldenDict-ng 补不了）
+1,260,774 条  →  30,506 条（33 MB → 605 KB）
+  单字行保留     8,288
+  词级行保留    22,218
+    不能按字生成     714   （词悦补不了）
+    OpenCC 补不了 21,504   （GoldenDict-ng 补不了）
 ```
 
 脚本在写文件前会校验「源表每一条仍可推导」，写完后再校验一次输出文件，因此不会在

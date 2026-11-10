@@ -46,9 +46,12 @@ def parse(path: str) -> list[tuple[str, list[str], str]]:
             if not raw.strip() or raw.startswith("#"):
                 continue
             parts = raw.split()
+            # head 可能帶 /X homonym flag（見 generate_zh_dic.py），判斷
+            # 單字/多字與字級組合時必須剝掉，否則「发/X」會被當多字詞。
+            head = parts[0].split("/", 1)[0]
             targets = [part[3:] for part in parts[1:] if part.startswith("st:")]
             if targets:
-                entries.append((parts[0], targets, raw))
+                entries.append((head, targets, raw))
     return entries
 
 

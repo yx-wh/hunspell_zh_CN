@@ -17,16 +17,73 @@ import os
 from collections import OrderedDict, defaultdict
 from opencc import OpenCC
 
-# OpenCC t2s 漏掉的一簡對多繁異體字，逐字手動補齊。
+# 在 OpenCC t2s 之後逐字折疊到規範形的人工白名單。
+# 每加一條，所有含該字的詞頭都會被歸進同一組，因此只收
+# 「確認是同一字的另一種寫法」的字，寧缺勿濫。
+#
+# 審定方法（離線，不進執行期依賴）：
+#   1. Unihan_Variants.txt 的 kTraditionalVariant 反向聚合，取候選字 c 的繁體 T；
+#   2. 用「單字」OpenCC t2s(T) 求規範形 S（必須單字：詞組規則會把
+#      「錢鍾書」轉成「钱锺书」而不合併）；
+#   3. 只收 2013《通用規範漢字表》為姓氏人名／地名類推簡化、
+#      且檢索上確需互通者，並以該字表攔住過度合併；
+#   4. 再按本機辭典組的實際立目情況取捨：註釋裡的本數／條數即為
+#      48 本 MDX + 1 本 DSL 中該字的詞級用量，0 條者不收。
+#   5. 切勿整表灌入 kSemanticVariant 或通用異體字表：那會連
+#      「乾→干」「了→瞭」「借→藉」這類跨語義的字也折進來。
 CHAR_FIX = {
+    # 一簡對多繁：OpenCC t2s 漏掉的異體
     "懽": "欢",
     "歓": "欢",
     "歡": "欢",
-    #"讙": "欢",
+    # 2013 類推簡化字：OpenCC 刻意保留為獨立規範字，但檢索上須互通
+    "锺": "钟",   # 繁體 鍾；本機 12 本 / 29 條
+    "缐": "线",   # 繁體 線；14 本 / 14 條
+    "钜": "巨",   # 繁體 鉅；單字 0 本，但詞級 20 本 / 139 條
+    # 擴展區類推簡化字：本機辭典確實用它立目，不折則查不到
+    "𢧐": "战",   # 繁體 戰；4 本 / 4 條
+    "𫫇": "恶",   # 繁體 噁；10 本 / 15 條
+    "𬞟": "苹",   # 繁體 蘋；12 本 / 20 條
+    "𧹒": "买",   # 繁體 買；3 本 / 3 條
+    "𫔭": "开",   # 繁體 開；2 本 / 2 條
+    "𫖸": "愿",   # 繁體 願；2 本 / 2 條
+    "𫗯": "糇",   # 繁體 餱；3 本 / 3 條
+    "㳽": "弥",   # 繁體 瀰；6 本 / 6 條
+    "䙓": "摆",   # 繁體 襬；3 本 / 3 條
+    "𧹔": "账",   # 繁體 賬；1 本 / 1 條
+    "𪠽": "当",   # 繁體 噹；1 本 / 1 條
+    "𫍿": "谫",   # 繁體 譾；1 本 / 1 條
+    "𲈛": "钟",   # 繁體 鍾；Unihan 無記錄，詞級僅 1 條，留作兜底
+    # 明確不收（雖在同組、且本機也有條目）：
+    #   迳→径、飏→扬、镕、闫：2013 字表特意分出的獨立規範字；
+    #   复→覆（2381 條）、馀→余（71 條）、渖→沈（11 條）、
+    #   镟→旋（5 條）：同為簡化字但語義不同，或已由 OpenCC 詞組
+    #   規則區分，逐字硬折會把「復習」帶成「覆習」、「餘勇」帶成
+    #   「余勇」，引入跨語義候選。
 }
 
 
+# 同一個 head 多行時加在 head 後的 flag。標準 hunspell 的 hashmgr 會把
+# 「無 affix flag」的同形詞當重複詞去重，只留第一行（1.7.6 實測：发 st:發
+# / 发 st:髮 只剩 發）；帶 flag 則走 next_homonym 分支，兩行都保留。
+# 這個 flag 不必在 .aff 裡定義——未定義 flag 被忽略，不影響 spell()。
+HOMONYM_FLAG = "X"
+
+
+def validate_char_fix(fix):
+    """白名單必須是單字對單字、無自映射、無鏈式摺疊。"""
+    for src, dst in fix.items():
+        if len(src) != 1 or len(dst) != 1:
+            raise ValueError(f"CHAR_FIX 必須是單字對單字: {src!r} -> {dst!r}")
+        if src == dst:
+            raise ValueError(f"CHAR_FIX 自映射: {src!r}")
+        if dst in fix:
+            raise ValueError(f"CHAR_FIX 鏈式摺疊（單遍替換不會生效）: {src!r} -> {dst!r}")
+
+
 def make_normalizer(cc):
+    validate_char_fix(CHAR_FIX)
+
     def normalize(word: str) -> str:
         s = cc.convert(word).strip()
         if not s:
@@ -85,10 +142,13 @@ def main():
             # 繁簡相同、無變體，對 Goldendict 詞幹還原無用，跳過
             continue
 
+        # 標準形→多個變體是「同一個 head、多行」，標準 hunspell 會去重，
+        # 因此多於一個變體時給 head 加 flag（見 HOMONYM_FLAG 註釋）。
+        homonym = f"/{HOMONYM_FLAG}" if len(others) > 1 else ""
         for v in others:
             lines.append(f"{v} st:{std}")
         for v in others:
-            lines.append(f"{std} st:{v}")
+            lines.append(f"{std}{homonym} st:{v}")
 
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(str(len(lines)) + "\n")
