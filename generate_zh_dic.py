@@ -18,6 +18,17 @@ import json
 from collections import Counter, OrderedDict, defaultdict
 from opencc import OpenCC
 
+# 日本新字体 ↔ 中文 的生成逻辑（F1 并入 zh_CN.dic，F2 写入 ja_JP.dic）。
+# 找不到模块时退化：不并入 F1、不生成 ja_JP，原有简繁生成不受影响。
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from jp_shinjitai_lib import merge_f1, write_ja
+except ImportError:
+    def merge_f1(lines, data=None):
+        return lines
+    def write_ja(out_dir, data=None):
+        return None, None
+
 # 在 OpenCC t2s 之後逐字折疊到規範形的人工白名單。
 # 每加一條，所有含該字的詞頭都會被歸進同一組，因此只收
 # 「確認是同一字的另一種寫法」的字，寧缺勿濫。
@@ -725,6 +736,9 @@ def main():
             injected += 1
         print(f"從異體字表補進 {injected} 條正向行（無立目異體，只進不出）")
 
+    # 并入「日本新字体→中文」(F1) 条目：去重、并跳过与简繁表重复的 jp==simp 字符。
+    lines = merge_f1(lines)
+
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(str(len(lines)) + "\n")
         if lines:
@@ -736,6 +750,13 @@ def main():
         f.write("SET UTF-8\n")
         f.write("LANG zh\n")
         f.write("FLAG long\n")
+
+    # 写出 ja_JP.txt（中文→新字体，F2）；仅为完整 ja_JP.dic 的一部分，
+    # 真正的日文 hunspell 还含日文词形还原（走らない→走る），需另行并入。
+    # 真正的 .aff 由对方项目提供，此处不写。
+    ja_dic = write_ja(os.path.dirname(out_path) or ".")
+    if ja_dic:
+        print(f"已生成: {ja_dic}")
 
     print(f"已生成: {out_path}")
     print(f"已生成: {aff_path}")

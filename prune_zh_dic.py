@@ -143,13 +143,17 @@ def main() -> int:
         else:
             kept_opencc += 1
 
-    dic_path = stem + ".dic"
-    aff_path = stem + ".aff"
+    ext = os.path.splitext(source)[1] or ".dic"
+    dic_path = stem + ext
     with io.open(dic_path, "w", encoding="utf-8", newline="\n") as handle:
         handle.write(f"{len(kept)}\n")
         handle.write("\n".join(kept))
         handle.write("\n")
-    shutil.copyfile(os.path.splitext(source)[0] + ".aff", aff_path)
+    # 仅当源 .aff 存在时才复制（zh_CN 有配套 .aff；ja_JP 的 .aff 由对方项目
+    # 提供，此处不写，故跳过）。
+    src_aff = os.path.splitext(source)[0] + ".aff"
+    if os.path.exists(src_aff):
+        shutil.copyfile(src_aff, stem + ".aff")
 
     # Verification: re-read the written file and re-check every decision on the
     # written data, so a parsing or formatting slip cannot pass silently.

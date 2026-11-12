@@ -1,6 +1,6 @@
 # hunspell_zh_CN
 
-用于中文的 Hunspell 词形表，供[词悦](https://github.com/mumu-lhl/Ciyue/)（Ciyue）和 [次世代GoldenDict](https://github.com/xiaoyifang/goldendict-ng/) 做简繁与异体字通查。
+用于中文的 Hunspell 词形表，供[词悦](https://github.com/mumu-lhl/Ciyue/)（Ciyue）和 [次世代GoldenDict](https://github.com/xiaoyifang/goldendict-ng/) 做简繁、异体字，以及**中文与日本新字体（Shinjitai）**的通查。
 
 中文没有词形变化，所以这里的 `st:` 干的是另一件事：记录**哪些字是同一个字的另一种
 写法**。词悦会按字读这张表，再组合，因此用一种写法输入的查询，能够命中用另一种写法建立的
@@ -10,11 +10,21 @@
 
 | 文件 | 大小 | 用于 |
 | --- | --- | --- |
-| `zh_CN.dic` | 35,073 条，约 676 KB | **词悦、GoldenDict-ng** |
+| `zh_CN.dic` | 41,413 条 | **词悦、GoldenDict-ng**；已含 F1 新字体→中文 |
 | `zh_CN.aff` | 38 B | 与上面配对，空壳 |
+| `ja_JP.txt` | 10,581 条 | **中文→新字体（F2）**，完整 `ja_JP.dic` 的一部分（仅转换表，不含日文词形还原；`.aff` 由对方项目提供）；含 `expand_jp_words.py` 从词典补全的词级（Case A 多对一 + Case B 中1↔日多） |
+| `ja_JP_pruned.txt` | 9,853 条 | `ja_JP.txt` 精简版（仅去词悦/OpenCC 均能自行推导的词级行；其中 Case B 词级因可由单字级拼出而被删，留给不吃 OpenCC 的读取器用 `ja_JP.txt`） |
+| `jp_shinjitai.json` | — | 新字体↔中文 中间数据（chars/words 各带 `trad`/`simp`） |
+| `jp_words_extra.json` | — | Case A「日1↔中多」（弁→辩/辨…）词级扩充，并入 F1/F2（`expand_jp_words.py` 生成） |
+| `jp_words_b.json` | — | Case B「中1↔日多」（历→歴/暦）词级扩充，仅并入 F2（`expand_jp_words.py` 生成） |
+| `opencc_JPShinjitaiCharacters.txt` / `.Phrases.txt` | — | OpenCC 上游表，溯源用 |
+| `build_jp_shinjitai.py` | — | 由上游表派生 `jp_shinjitai.json` |
+| `expand_jp_words.py` | — | 两趟补全词级：Case A 中文侧（`s2t`+`t2jp`，日文形式须真在日文词典）；Case B 日文侧（纯汉字日文词 + 中1↔日多字符，不要求中文词头在中文辞典） |
+| `generate_jp_zh.py` | — | 增量并入 F1 / 写出 ja_JP（不重跑整表生成时使用） |
+| `jp_shinjitai_lib.py` | — | F1/F2 生成逻辑，被上面脚本共用 |
 | `build_words.py` | — | 从词典目录生成 `words.txt` |
-| `generate_zh_dic.py` | — | 从词表生成**全量** `.dic` |
-| `prune_zh_dic.py` | — | 把全量表精简成上面那份 |
+| `generate_zh_dic.py` | — | 从词表生成**全量** `.dic`，并自动并入 F1、写出 `ja_JP` |
+| `prune_zh_dic.py` | — | 把全量表精简成发布版 |
 
 本仓库发布的 `zh_CN.dic` 是**精简版**。全量表只是那几本词典词头的派生结果，谁手上有
 那些词典都能自己生成；它也没必要全灌进词悦和 GoldenDict-ng——被删掉的那部分，两者都
@@ -174,6 +184,29 @@ python3 generate_zh_dic.py words.txt zh_CN_full.dic /path/to/variants.json
 归一化到简体，写正向行 `v st:std`；反向行只在 `v` 真的被辞典用来组词时才写
 （见「单字条目」一节）。繁简相同的词没有变体，直接跳过。
 
+**这一步会同时**：把「日本新字体→中文」（F1）并入 `zh_CN_full.dic`，并写出
+`ja_JP.txt`（中文→新字体，F2；只是完整 `ja_JP.dic` 的一部分，见下）。依赖同目录下的 `jp_shinjitai.json`，
+数据缺失时自动跳过、不影响原简繁生成。`jp_shinjitai.json` 由
+`build_jp_shinjitai.py` 从 OpenCC 上游表 `opencc_JPShinjitai*.txt` 派生，一般无需手动改。
+
+「多对一」新字体（弁→辩/辨/瓣/办 等）不能做字符级 `st:`（会污染中文搜索，中文本来也有
+「弁」），只能走词级；但 OpenCC 的词级表太薄，连 `弁証法` 都没收。要补全：先 `build_words.py`
+备好中文词头 `words.txt`，再跑 `python3 expand_jp_words.py`，它分两趟从你手头真实的中日词典补全词级：
+
+- **Case A（日1↔中多）**：扫描中文词头 → `s2t`+`t2jp` 折成日文形式，仅留日文形式真在日文词典里的
+  （你是在日文文本里看到这词才查的，所以必须真有这个词），写出 `jp_words_extra.json`，并入 F1/F2。
+- **Case B（中1↔日多）**：扫描日文词典词头里**纯汉字**、且含「中1↔日多」字符（历→歴/暦、铺→舖/舗…）
+  的词 → `jp2t`+`t2s`，**不要求中文词头在中文辞典**（你是用中文输入法去拼不会念的日文词），写出
+  `jp_words_b.json`，仅并入 F2。
+
+两者生成时都由 `jp_shinjitai_lib` 自动并入（Case B 只进 F2，F1 由单字级按字拼出，不入以免膨胀）。
+
+若只想把 F1 增量并入已有的 `zh_CN.dic`、或重新写出 `ja_JP.*` 而不重跑整表生成，用：
+
+```bash
+python3 generate_jp_zh.py
+```
+
 单字条目不是单独维护的：中文词典的词表本身就收录单字词头，同一套逻辑自然会把
 `閒 st:闲` 这类行产出来——而它们正是词悦能按字组合的前提。
 
@@ -229,7 +262,7 @@ python3 prune_zh_dic.py zh_CN_full.dic zh_CN
 其余保留：
 
 ```
-1,264,295 条  →  35,073 条（33 MB → 676 KB）
+1,264,295 条  →  35,840 条（33 MB → 约 690 KB，已含 F1 新字体→中文）
   单字行保留    10,565
   词级行保留    24,508
     不能按字生成   1,256   （词悦补不了）
@@ -238,6 +271,55 @@ python3 prune_zh_dic.py zh_CN_full.dic zh_CN
 
 脚本在写文件前会校验「源表每一条仍可推导」，写完后再校验一次输出文件，因此不会在
 无声无息中丢掉候选。换 OpenCC 版本后重跑一次即可，几秒完成。
+
+## 日本新字体（新字体 ↔ 中文）
+
+上面的 `zh_CN.dic` 只处理「中文 ↔ 中文」的写法；本仓库另带一份**日本新字体（Shinjitai）**
+互通表，覆盖「新字体 ↔ 中文简/繁」两个方向：
+
+| 方向 | 文件 | 形态 | 效果 |
+| --- | --- | --- | --- |
+| 新字体 → 中文（F1） | `zh_CN.dic`（已并入） | `新字体 st:中文` | 在中文词典里输入 `桜` / `関数`，命中 `櫻` / `函數`（也含简体 `樱` / `函数`） |
+| 中文 → 新字体（F2） | `ja_JP.txt` | `中文 st:新字体` | 输入 `函数` / `函數`，命中 `関数` |
+
+> `ja_JP.txt` 只是完整 `ja_JP.dic` 的**一部分**——真正的日文 Hunspell 还包含日文词形还原（如 `走らない → 走る`），需把它并入 [yx-wh/hunspell_ja_JP](https://github.com/yx-wh/hunspell_ja_JP) 之类的完整表。单独测试时，把 `ja_JP.txt` 改名 `ja_JP.dic`，与对方项目的 `ja_JP.aff`（含真正词形还原）同目录后导入即可。
+
+F2 单独成文件，是因为它是「日文 hunspell」视角：head 是中文，target 是日本新字体。与
+`zh_CN.dic` 方向相反，互不污染——中文词典查 `佛` 不会无故展开到 `仏`。
+
+### 数据来源与生成
+
+映射来自 OpenCC 的 `JPShinjitaiCharacters` / `JPShinjitaiPhrases`（已存为
+`opencc_JPShinjitai*.txt` 作溯源）。`build_jp_shinjitai.py` 读这两份表，用 OpenCC `t2s`
+把旧字体再折到简体，派生出 `jp_shinjitai.json`：每个条目同时带 `trad`（繁）与 `simp`（简）
+两侧。字符段只收「一新对一旧」的单字；**多对一**（如 `弁` → 辩/辨/瓣/办）不进字符段，
+留给词级表按词处理，避免污染逐字查询。
+
+生成由 `generate_zh_dic.py` 内置：跑它就**自动**把 F1 并入 `zh_CN.dic`、并写出 `ja_JP.txt`
+（见「生成」一节）。只想增量更新、不重跑整表生成时，用 `generate_jp_zh.py`。
+
+### 几条约定
+
+- **身份跳过**：新字体与简体中文同形（国/体/对…）时，其 `st:繁体` 与 `zh_CN.dic` 既有的
+  简繁通查条目完全重复，字符段直接跳过，交给简繁表；`st:简体` 本就是身份映射也略去。
+- **`/X` 多目标**：一个 head 对应简+繁两个中文形（桜 → 櫻/樱、`関数` → 函數/函数）时，
+  同 head 多行带未定义的 `/X` 旗标，绕过 Hunspell 1.7.3 的去重 bug（见上）。
+- **F2 双入口**：每个中文形同时给**简体**与**繁体**两个 head（`函数 st:関数`、
+  `函數 st:関数`），覆盖「简化字立目」与「繁体立目」辞典，以及不吃 OpenCC 的词悦。
+- **与 OpenCC 的关系**：GD-ng 内置的「中日汉字转换」（OpenCC `t2jp`/`jp2t`）已能覆盖
+  繁→新字体；但简体→新字体（对→対、函数→関数）和词级替换（函數/函数→関数）OpenCC 一步
+  覆盖不到，`ja_JP.txt` 补的就是这部分。词悦没有 OpenCC，全部靠 `.txt`。
+
+### 挂载方式
+
+**词悦**：设置 → Hunspell → 打开「启用词形还原与变体查找」；点「导入」选包含
+`.aff`+`.dic` 的文件夹。**`zh_CN` 与 `ja_JP` 可同时导入**，每个源有独立开关与
+「两遍查找」选项。查找模式建议选「补充」，这样 `関数` 会展开出 `函數`/`函数`、
+`函数` 会展开出 `関数`，与精确词条并列显示。
+
+**GoldenDict-ng**：编辑 → 词典 → 词典来源 → **Morphology**，把 `ja_JP.txt` 改名 `ja_JP.dic`、与对方项目的 `ja_JP.aff` 同目录后加入该目录（同样地，可与 `zh_CN` 的 Morphology 源并存，按词典组分别启用）。也可同时勾选内置的
+「中日汉字转换 → Japanese Shinjitai」，两者互补：`ja_JP.txt` 负责 OpenCC 补不到的
+简体 head 与词级替换。
 
 ## 已知边界
 
