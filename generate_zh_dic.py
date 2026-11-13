@@ -595,7 +595,10 @@ CHAR_FIX = {
 # 「無 affix flag」的同形詞當重複詞去重，只留第一行（1.7.6 實測：发 st:發
 # / 发 st:髮 只剩 發）；帶 flag 則走 next_homonym 分支，兩行都保留。
 # 這個 flag 不必在 .aff 裡定義——未定義 flag 被忽略，不影響 spell()。
-HOMONYM_FLAG = "X"
+# 必須是兩字符：zh_CN.aff 是 FLAG long，單字符會被 decode_flags 按 len/2
+# 截成零長度向量（只留下「非空指針」這個副作用），既可能冒 bad flagvector
+# 警告，也依賴實現細節，上游一改就靜默失效。
+HOMONYM_FLAG = "Xx"
 
 
 def validate_char_fix(fix):

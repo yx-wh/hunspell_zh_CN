@@ -9,8 +9,10 @@ F1 新字体→中文：head=新字体, target=中文（并入 zh_CN.dic）
 F2 中文→新字体：head=中文(简+繁), target=新字体（写入 ja_JP.dic）
 
 约定（与 generate_zh_dic.py 一致）：
-  - 条目形态 `head st:target`；同一 head 多行加 /X 旗标（HOMONYM_FLAG）。
-    未定义的 flag 被 hunspell 忽略，不影响 spell()。
+  - F1（写入 zh_CN.dic）条目形态 `head st:target`；同一 head 多行加 /Xx 旗标
+    （HOMONYM_FLAG）。未定义的 flag 被 hunspell 忽略，不影响 spell()。
+  - F2（写入 ja_JP.txt）不加旗标：那边的 .aff 与 flag 约定由日文项目
+    （hunspell_ja_JP）决定，本文件不参与。
   - target == head 一律跳过（如「国」的 simp 侧 == 国，只保留「國」侧）。
   - F1 字符段里「新字体 == 简体中文」的条目（国/体/对…）与 zh_CN.dic 既有的
     简繁通查条目重复，直接跳过，交由简繁表处理。
@@ -24,7 +26,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_JSON = os.path.join(HERE, "jp_shinjitai.json")
 EXTRA_JSON = os.path.join(HERE, "jp_words_extra.json")  # Case A：日1↔中多，并入 F1/F2
 B_JSON = os.path.join(HERE, "jp_words_b.json")          # Case B：中1↔日多，仅并入 F2
-HOMONYM_FLAG = "X"
+# 仅用于 F1（写进 zh_CN.dic，那边 FLAG long，故两字符）。F2 不写旗标。
+HOMONYM_FLAG = "Xx"
 
 
 def load_jp_data(path=DEFAULT_JSON):
