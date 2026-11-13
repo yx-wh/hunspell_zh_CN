@@ -45,6 +45,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 HOMONYM_FLAG = "Xx"
 HOMONYM_SUFFIX = "/" + HOMONYM_FLAG
 
+# generate_zh_dic.HEAD_SLASH：詞頭裡的「/」在 .dic 中以私用區字元存放（.aff 的
+# ICONV/OCONV 負責換回），做字級比較前要先還原成真正的「/」。
+HEAD_SLASH = "\ue000"
+
 
 def parse(path: str) -> list[tuple[str, list[str], str]]:
     """Reads a .dic into (headword, [st: targets], raw line), order preserved."""
@@ -56,9 +60,10 @@ def parse(path: str) -> list[tuple[str, list[str], str]]:
             if not raw.strip() or raw.startswith("#"):
                 continue
             parts = raw.split()
-            # head 可能帶 /X homonym flag（見 generate_zh_dic.py），判斷
-            # 單字/多字與字級組合時必須剝掉，否則「发/X」會被當多字詞。
-            head = parts[0].split("/", 1)[0]
+            # head 可能帶 /Xx homonym flag（見 generate_zh_dic.py），判斷
+            # 單字/多字與字級組合時必須剝掉，否則「发/Xx」會被當多字詞；
+            # 詞頭裡的 HEAD_SLASH 也要還原成「/」再比較。
+            head = parts[0].split("/", 1)[0].replace(HEAD_SLASH, "/")
             targets = [part[3:] for part in parts[1:] if part.startswith("st:")]
             if targets:
                 entries.append((head, targets, raw))
@@ -174,12 +179,20 @@ def main() -> int:
 
     kept: list[str] = []
     single = kept_chars = dropped = 0
-    kept_composition = kept_opencc = 0
+    kept_composition = kept_opencc = kept_slash = 0
 
     for head, targets, raw in entries:
         if len(head) == 1:
             kept.append(raw)
             single += 1
+            continue
+
+        if HEAD_SLASH in raw.split(" ", 1)[0]:
+            # 詞頭含「/」的行一律保留：Hunspell 不做字級合成，整詞只能靠這一條
+            # 詞頭（配合 .aff 的 ICONV/OCONV）命中；按「兩個讀取器都能推出來」
+            # 的標準刪掉的話，重建一次這批詞就從 Hunspell 側徹底消失。
+            kept.append(raw)
+            kept_slash += 1
             continue
 
         reason = None  # why the line cannot be dropped
@@ -246,6 +259,7 @@ def main() -> int:
     print(f"source      : {source} ({len(entries):,} entries, {size_in:.1f} MB)")
     print(f"output      : {dic_path} ({len(kept):,} entries, {size_out:.2f} MB)")
     print(f"  single-char kept : {single:,}")
+    print(f"  slash-head kept  : {kept_slash:,}")
     print(f"  word lines kept  : {kept_chars:,}")
     print(f"    for composition: {kept_composition:,}")
     print(f"    for OpenCC     : {kept_opencc:,}")

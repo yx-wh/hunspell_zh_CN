@@ -600,6 +600,22 @@ CHAR_FIX = {
 # 警告，也依賴實現細節，上游一改就靜默失效。
 HOMONYM_FLAG = "Xx"
 
+# 詞頭裡不能出現「/」：hunspell 把它當 flag 分隔符，`TCP/IP協議` 會被解析成詞頭
+# `TCP` + flag `IP協議`，spell() 永遠查不到整詞。資料側用私用區字元代替，
+# zh_CN.aff 用 ICONV/OCONV 在查詢與輸出時換回（見 README「帶斜線的詞頭」）。
+HEAD_SLASH = "\ue000"
+
+
+def protect_head(line):
+    """把詞頭裡的 `/` 換成 HEAD_SLASH；行尾的 `/Xx` 旗標保持 ASCII。"""
+    token, sep, rest = line.partition(" ")
+    if "/" not in token:
+        return line
+    suffix = ""
+    if token.endswith("/" + HOMONYM_FLAG):
+        token, suffix = token[: -len(HOMONYM_FLAG) - 1], "/" + HOMONYM_FLAG
+    return token.replace("/", HEAD_SLASH) + suffix + sep + rest
+
 
 def validate_char_fix(fix):
     """白名單必須是單字對單字、無自映射、無鏈式摺疊。"""
@@ -741,6 +757,9 @@ def main():
 
     # 并入「日本新字体→中文」(F1) 条目：去重、并跳过与简繁表重复的 jp==simp 字符。
     lines = merge_f1(lines)
+
+    # 詞頭裡的「/」必須先換掉，否則寫進 .dic 會被當成 flag 分隔符。
+    lines = [protect_head(line) for line in lines]
 
     with open(out_path, "w", encoding="utf-8", newline="\n") as f:
         f.write(str(len(lines)) + "\n")

@@ -182,6 +182,44 @@ Hunspell 1.7.3 的 [`f23fcd33`](https://github.com/hunspell/hunspell/commit/f23f
 真要删时，`generate_zh_dic.py` 与 `jp_shinjitai_lib.py` 里的 `HOMONYM_FLAG` 常量要一起
 改（F1 并入的条目也走它），再重新生成 `zh_CN.dic`。
 
+## 带斜杠的词头
+
+`TCP/IP協議`、`IEEE/ACM網絡彙刊`、`F/A-22“猛禽”戰鬥/攻擊機` 这类词头本身含 `/`，
+而 `/` 在 `.dic` 里是 flag 分隔符：Hunspell 把 `TCP/IP協議` 解析成词头 `TCP` + flag
+`IP協議`，`spell("TCP/IP協議")` 永远为 false（`analyze` 有时能出结果，那是顺着 homonym
+链读到了别的词条，属于巧合）。
+
+Hunspell 没有转义语法，只能靠 `.aff` 的 `ICONV` / `OCONV` 绕：
+
+```text
+# zh_CN.aff —— ⟨PUA⟩ 指 U+E000 这个私用区字符本身，不是字面量
+ICONV 1
+ICONV / ⟨PUA⟩
+OCONV 1
+OCONV ⟨PUA⟩ /
+```
+
+数据侧词头里的
+`/` 存成 U+E000（`generate_zh_dic.HEAD_SLASH`，生成时由 `protect_head()` 自动替换）；
+查询时 `ICONV` 把 `/` 换成 U+E000 去匹配词头，输出（stem / analyze / 建议）再由
+`OCONV` 换回 `/`。`st:` 目标里的 `/` 不用换——那部分不是 flag 字段。
+
+实测（hunspell 1.7.6 库 API）：
+
+```text
+spell("IEEE/ACM網絡彙刊") = 1
+stem("IEEE/ACM網絡彙刊")  = ["IEEE/ACM网络汇刊"]
+analyze("TCP/IP協議")     = [" st:TCP/IP协议"]
+```
+
+限制有两条：
+
+- 命令行 `hunspell -a` / `-l` 会先在 `/` 处切词，`ICONV` 看不到整词；这条路只对走库
+  API 的消费者（GoldenDict-ng、词悦）有效，命令行查不到属预期。
+- `prune_zh_dic.py` 对含 `/` 的词头一律保留，不套「两个读取器都能推出来就删」的判定；
+  否则重建一次这批词就从 Hunspell 侧彻底消失了（词悦能逐字合成、OpenCC 也能转，但
+  Hunspell 不做字级合成，`spell()` 只认词头本身）。
+
 ## 生成
 
 需要 `pip install opencc-python-reimplemented`，以及 `mdict-utils`（处理 `.mdx`）。
@@ -357,3 +395,4 @@ F2 单独成文件，是因为它是「日文 hunspell」视角：head 是中文
 - 只做**精确查找**：`st:` 映射整词，无法补全尚未输入的字，所以逐键建议不会展开异体。
 - 逐字替换要求**字数相同**；字数不同的映射必须写成词级条目。
 - 依赖 Hunspell 的 homonym 行为：1.7.3–1.7.6 上「同 head、无 flag」的行会被去重，本表用未定义的 `/Xx` 绕过（上游 `cca6830` 已修，但要等 1.7.7 铺到下游才谈得上移除），见上面的说明。
+- 含 `/` 的词头靠 `.aff` 的 `ICONV`/`OCONV` 生效；命令行 `hunspell -a` / `-l` 会先在 `/` 处切词，这类词查不到属预期，见「带斜杠的词头」一节。

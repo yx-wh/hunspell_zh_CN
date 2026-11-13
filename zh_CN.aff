@@ -1,5 +1,11 @@
 SET UTF-8
 LANG zh
 FLAG long
-# 空壳
+# 沒有 affix 規則（只有下面的 ICONV/OCONV）
 
+# 詞頭裡的「/」是 flag 分隔符，資料側存 U+E000（generate_zh_dic.HEAD_SLASH），
+# 查詢時換進去、輸出時換回來，這樣 `TCP/IP協議` 這種詞頭才查得到。
+ICONV 1
+ICONV / 
+OCONV 1
+OCONV  /
