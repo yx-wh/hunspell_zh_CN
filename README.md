@@ -138,17 +138,32 @@ head 的多行**：
 发/X st:髮
 ```
 
-`/X` 不是词缀规则，`zh_CN.aff` 里也没有定义它。它是用来绕过一个上游bug的。
+`/X` 不是词缀规则，`zh_CN.aff` 里也没有定义它。它是用来绕过一个上游 bug 的兼容写法。
 
 Hunspell 1.7.3 的 [`f23fcd33`](https://github.com/hunspell/hunspell/commit/f23fcd33052c7c8a307eaa3e1b1a4c0cdcf45651)
 （`ofz: Out-of-memory`）在 `HashMgr::add_word()` 里加了「同 head、无 affix flag
 的一律当重复词跳过」的分支，却没比较 `HENTRY_DATA`（morph 描述）。于是
 `发 st:發` / `发 st:髮` 两行只留第一行，`髮` 静默消失——`spell("发")` 仍是 true，
-所以拼写检查这一侧完全看不出问题。1.7.2 及以前走 `next_homonym`，两行都保留。
+所以拼写检查这一侧完全看不出问题。
+
+上游已修：[`cca6830`](https://github.com/hunspell/hunspell/commit/cca68306aedd1a4daea8a5b7d9b9e1886ae71b41)
+（2026-11-12，Resolves [hunspell#1171](https://github.com/hunspell/hunspell/issues/1171)）
+把判重条件换成 `same_entry_without_flags()`：任一方带 flag 不算重复，双方都无 flag
+且 `HENTRY_DATA` 相同才算重复。但它在 v1.7.6 之后 27 个 commit，**尚无任何 release
+包含它**，按上游节奏预计从 1.7.7 起。
+
+| hunspell 版本 | 不带 `/X` 的 `发 st:發` / `发 st:髮` | 带 `/X` |
+|---|---|---|
+| ≤ 1.7.2 | 两行都留（`next_homonym`） | 两行都留 |
+| 1.7.3 – 1.7.6 | 只剩第一行，`髮` 丢失 | 两行都留 |
+| ≥ 含 `cca6830`（1.7.7+） | 两行都留 | 两行都留 |
+
+所以 `/X` 是**兼容写法，不是临时补丁**：在新旧库上结果一致，只对 1.7.3–1.7.6 起作用。
+截至 2026-11，Debian unstable/testing、Ubuntu 开发版、Fedora 43/44/45、Arch、Homebrew
+都还是 1.7.6，删掉会让当前绝大多数用户丢词。
 
 带上任意一个 flag 就改回 `next_homonym` 分支；未定义的 flag 不产生派生词形，也不
-影响 `spell()`（`hunspell -G` 只会吐出词本身）。已向上游报告：
-[hunspell#1171](https://github.com/hunspell/hunspell/issues/1171)。
+影响 `spell()`（`hunspell -G` 只会吐出词本身），代价只是多目标行多两个字节。
 
 只有「一个 head 对应多个变体」的行才需要加，单值行不加。两个前提：
 
@@ -156,8 +171,12 @@ Hunspell 1.7.3 的 [`f23fcd33`](https://github.com/hunspell/hunspell/commit/f23f
 - `FLAG` 不能是 `num`，否则 `X` 不是合法 flag，那两行会重新被合并掉。
 
 标准 Hunspell（包括 GoldenDict-ng 用的系统库）都需要这个 flag。词悦自己 vendored
-了 `hashmgr.cxx` 并放宽了去重条件，加不加都能拿到全部词干；等上游合并修复后，这里
-可以改回不带 flag 的写法。
+了 `hashmgr.cxx` 并放宽了去重条件，加不加都能拿到全部词干。
+
+**移除条件**：只有当确定不再支持 < 1.7.7 的 hunspell 时才可去掉 `/X`。这类非 CVE
+修复不会回填到 LTS / 稳定版发行版，1.7.3 这一代按发行版生命周期会用到 2030 年前后。
+真要删时，`generate_zh_dic.py` 的 `HOMONYM_FLAG` 与 `jp_shinjitai_lib.py` 里的同名
+常量要一起改。
 
 ## 生成
 
@@ -303,7 +322,8 @@ F2 单独成文件，是因为它是「日文 hunspell」视角：head 是中文
 - **身份跳过**：新字体与简体中文同形（国/体/对…）时，其 `st:繁体` 与 `zh_CN.dic` 既有的
   简繁通查条目完全重复，字符段直接跳过，交给简繁表；`st:简体` 本就是身份映射也略去。
 - **`/X` 多目标**：一个 head 对应简+繁两个中文形（桜 → 櫻/樱、`関数` → 函數/函数）时，
-  同 head 多行带未定义的 `/X` 旗标，绕过 Hunspell 1.7.3 的去重 bug（见上）。
+  同 head 多行带未定义的 `/X` 旗标，绕过 Hunspell 1.7.3–1.7.6 的去重 bug（见上；
+  上游 `cca6830` 已修，但发行版尚未跟进）。
 - **F2 双入口**：每个中文形同时给**简体**与**繁体**两个 head（`函数 st:関数`、
   `函數 st:関数`），覆盖「简化字立目」与「繁体立目」辞典，以及不吃 OpenCC 的词悦。
 - **与 OpenCC 的关系**：GD-ng 内置的「中日汉字转换」（OpenCC `t2jp`/`jp2t`）已能覆盖
@@ -326,4 +346,4 @@ F2 单独成文件，是因为它是「日文 hunspell」视角：head 是中文
 - 只覆盖**单字表里出现过**的字；表里没有的字保持原样，不会自行发明映射。
 - 只做**精确查找**：`st:` 映射整词，无法补全尚未输入的字，所以逐键建议不会展开异体。
 - 逐字替换要求**字数相同**；字数不同的映射必须写成词级条目。
-- 依赖 Hunspell 的 homonym 行为：1.7.3 起「同 head、无 flag」的行会被去重，本表用未定义的 `/X` 绕过，见上面的说明；上游修复后可去掉。
+- 依赖 Hunspell 的 homonym 行为：1.7.3–1.7.6 上「同 head、无 flag」的行会被去重，本表用未定义的 `/X` 绕过（上游 `cca6830` 已修，但要等 1.7.7 铺到下游才谈得上移除），见上面的说明。
