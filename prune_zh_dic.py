@@ -17,6 +17,11 @@ A word-level line is kept when **either** consumer cannot derive it:
 Single-character lines are always kept: they are the table Ciyue composes from,
 and GoldenDict-ng cannot use them at all, since it never composes characters.
 
+Pruning can leave a head with a single line behind, or with several lines of which
+only some carry the ``/Xx`` homonym flag. The flag is normalised before writing:
+one line per head goes without it, several lines all carry it, otherwise Hunspell
+still merges the flagless ones.
+
 Usage:
     python3 prune_zh_dic.py [source.dic] [output_stem]
 
@@ -34,6 +39,11 @@ import sys
 from collections import defaultdict
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# 与 generate_zh_dic.HOMONYM_FLAG 保持一致（那边顶层 import opencc，不宜从此处导入）。
+# 必须是两字符：zh_CN.aff 是 FLAG long。
+HOMONYM_FLAG = "Xx"
+HOMONYM_SUFFIX = "/" + HOMONYM_FLAG
 
 
 def parse(path: str) -> list[tuple[str, list[str], str]]:
@@ -104,6 +114,56 @@ class Converter:
         return result
 
 
+def split_head(raw: str) -> tuple[str, bool] | None:
+    """Returns ``(bare head, already flagged)``, or ``None`` for lines left alone.
+
+    A ``/`` inside the head itself (``F/A-22“猛禽”…``) cannot be told apart from a
+    flag separator, so such lines are neither counted nor rewritten.
+    """
+    token = raw.split(" ", 1)[0]
+    if token.endswith(HOMONYM_SUFFIX):
+        return token[: -len(HOMONYM_SUFFIX)], True
+    if "/" in token:
+        return None
+    return token, False
+
+
+def normalize_homonym_flags(lines: list[str]) -> tuple[list[str], int, int]:
+    """Keeps at most one line per head unflagged, and flags every line otherwise.
+
+    Hunspell only drops a homonym when *both* entries are flagless, so a head with
+    three lines where just one carries the flag still loses one of the other two;
+    conversely pruning often leaves a single line whose flag no longer does
+    anything. Returns the rewritten lines plus (flags added, flags removed).
+    """
+    counts: dict[str, int] = defaultdict(int)
+    parsed = [split_head(raw) for raw in lines]
+    # A slash-word (``F/A-22…``) parses as the same bare head Hunspell would see,
+    # so the group's real size is unknown: leave those heads exactly as they are.
+    unsafe: set[str] = set()
+    for raw, item in zip(lines, parsed):
+        if item is None:
+            unsafe.add(raw.split(" ", 1)[0].split("/", 1)[0])
+        else:
+            counts[item[0]] += 1
+
+    out = list(lines)
+    added = removed = 0
+    for index, (raw, item) in enumerate(zip(lines, parsed)):
+        if item is None or item[0] in unsafe:
+            continue
+        head, flagged = item
+        rest = raw[len(head):]
+        want = counts[head] > 1
+        if want and not flagged:
+            out[index] = head + HOMONYM_SUFFIX + rest
+            added += 1
+        elif flagged and not want:
+            out[index] = head + rest[len(HOMONYM_SUFFIX):]
+            removed += 1
+    return out, added, removed
+
+
 def main() -> int:
     source = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "zh_CN.dic")
     stem = sys.argv[2] if len(sys.argv) > 2 else os.path.join(HERE, "zh_CN_pruned")
@@ -143,6 +203,12 @@ def main() -> int:
         else:
             kept_opencc += 1
 
+    # 去重是按「同 head 且双方都无 flag」判定的，所以多行 head 必须每行都带
+    # 旗标；反过来，prune 删掉兄弟行后剩下的独行不再需要旗标。
+    kept_before = kept
+    kept, flags_added, flags_removed = normalize_homonym_flags(kept_before)
+    rewritten = dict(zip(kept_before, kept))
+
     ext = os.path.splitext(source)[1] or ".dic"
     dic_path = stem + ext
     with io.open(dic_path, "w", encoding="utf-8", newline="\n") as handle:
@@ -165,7 +231,7 @@ def main() -> int:
 
     reachable = 0
     for head, targets, raw in entries:
-        if raw in written:
+        if rewritten.get(raw, raw) in written:
             reachable += 1
             continue
         if all(char_composable(head, t, variants) for t in targets):
@@ -184,6 +250,7 @@ def main() -> int:
     print(f"    for composition: {kept_composition:,}")
     print(f"    for OpenCC     : {kept_opencc:,}")
     print(f"  dropped          : {dropped:,}")
+    print(f"  homonym flags    : +{flags_added:,} / -{flags_removed:,}")
     print("verified    : every source entry still derivable")
     return 0
 
